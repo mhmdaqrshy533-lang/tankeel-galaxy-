@@ -787,6 +787,7 @@ export default function App() {
       {gameState === 'ABOUT' && (
         <AboutPanel
           activeLanguage={activeLanguage}
+          stats={playerStats}
           onBack={() => {
             sound.playClick();
             setGameState('MAIN_MENU');

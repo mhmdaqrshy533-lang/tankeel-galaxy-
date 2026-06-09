@@ -383,38 +383,118 @@ export default function GameCanvas({
 
     worldGroup.add(towerGroup);
 
-    // 2. Spaceship model structure
+    // 2. Spaceship model structure - Dynamic Multi-layered Stealth Fighter (B-2 & F-35 Fusion)
     const shipGroup = new THREE.Group();
     // Initially positioned high up for cinematic orbiting
     shipGroup.position.set(20, 50, -40);
 
+    // Main stealth fuselage - flatted polygonal core
     const shipFuselage = new THREE.Mesh(
-      new THREE.ConeGeometry(2, 6, 4),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.85, roughness: 0.1 })
+      new THREE.ConeGeometry(1.6, 7.5, 4),
+      new THREE.MeshStandardMaterial({ color: 0x0f121a, metalness: 0.95, roughness: 0.25 })
     );
     shipFuselage.rotation.x = Math.PI / 2;
+    shipFuselage.scale.set(1.4, 1.0, 0.55); // Flat stealth profile
     shipGroup.add(shipFuselage);
 
-    // Wings left & right
-    const wingL = new THREE.Mesh(
-      new THREE.BoxGeometry(4, 0.2, 3),
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.9 })
+    // Golden / Cyan futuristic pilot canopy glass
+    const canopy = new THREE.Mesh(
+      new THREE.SphereGeometry(0.6, 8, 8),
+      new THREE.MeshStandardMaterial({ 
+        color: 0x06b6d4, 
+        emissive: 0x0891b2, 
+        emissiveIntensity: 0.6, 
+        metalness: 0.96, 
+        opacity: 0.85, 
+        transparent: true 
+      })
     );
-    wingL.position.set(-2, -0.4, -1);
+    canopy.position.set(0, 0.38, 1.2);
+    canopy.scale.set(0.8, 0.55, 1.85); // elongated dynamic look
+    shipGroup.add(canopy);
+
+    // Left swept-back wing (F-35 facet angle)
+    const wingL = new THREE.Mesh(
+      new THREE.BoxGeometry(5.4, 0.12, 3.2),
+      new THREE.MeshStandardMaterial({ color: 0x111622, metalness: 0.9, roughness: 0.3 })
+    );
+    wingL.position.set(-2.8, -0.1, -0.6);
+    wingL.rotation.y = -Math.PI / 10; // swept back
+    wingL.rotation.z = -Math.PI / 36; // negative anhedral angle
     shipGroup.add(wingL);
 
-    const wingR = wingL.clone();
-    wingR.position.x = 2;
+    // Right swept-back wing
+    const wingR = new THREE.Mesh(
+      new THREE.BoxGeometry(5.4, 0.12, 3.2),
+      new THREE.MeshStandardMaterial({ color: 0x111622, metalness: 0.9, roughness: 0.3 })
+    );
+    wingR.position.set(2.8, -0.1, -0.6);
+    wingR.rotation.y = Math.PI / 10;
+    wingR.rotation.z = Math.PI / 36;
     shipGroup.add(wingR);
 
-    // Thruster exhaust light
-    const engineExhaust = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.8, 1, 6),
-      new THREE.MeshBasicMaterial({ color: 0x06b6d4 })
+    // Secondary aerodynamic control trim flaps (extra layer)
+    const trimL = new THREE.Mesh(
+      new THREE.BoxGeometry(1.9, 0.08, 1.3),
+      new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.8 })
     );
-    engineExhaust.position.set(0, 0, -3.2);
-    engineExhaust.rotation.x = Math.PI / 2;
-    shipGroup.add(engineExhaust);
+    trimL.position.set(-4.5, -0.1, -1.8);
+    shipGroup.add(trimL);
+
+    const trimR = trimL.clone();
+    trimR.position.x = 4.5;
+    shipGroup.add(trimR);
+
+    // Angled vertical twin stealth stabilizer fins (angled outward to deflect radar)
+    const tailFinL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 1.9, 1.4),
+      new THREE.MeshStandardMaterial({ color: 0x1a202c, metalness: 0.9, roughness: 0.22 })
+    );
+    tailFinL.position.set(-0.85, 1.1, -2.4);
+    tailFinL.rotation.z = -Math.PI / 9; // outward sweep
+    tailFinL.rotation.y = -Math.PI / 18;
+    shipGroup.add(tailFinL);
+
+    const tailFinR = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 1.9, 1.4),
+      new THREE.MeshStandardMaterial({ color: 0x1a202c, metalness: 0.9, roughness: 0.22 })
+    );
+    tailFinR.position.set(0.85, 1.1, -2.4);
+    tailFinR.rotation.z = Math.PI / 9;
+    tailFinR.rotation.y = Math.PI / 18;
+    shipGroup.add(tailFinR);
+
+    // Twin High-Energy plasma engine exhausts
+    const exhaustL = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.32, 0.45, 1.0, 6),
+      new THREE.MeshBasicMaterial({ color: 0xef4444 }) // Hot ignition red
+    );
+    exhaustL.position.set(-0.48, -0.1, -3.5);
+    exhaustL.rotation.x = Math.PI / 2;
+    shipGroup.add(exhaustL);
+
+    const exhaustR = exhaustL.clone();
+    exhaustR.position.x = 0.48;
+    shipGroup.add(exhaustR);
+
+    // Underside tactical laser cannons
+    const laserPod = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1, 0.1, 1.6, 5),
+      new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.95 })
+    );
+    laserPod.position.set(0, -0.5, 1.4);
+    laserPod.rotation.x = Math.PI / 2;
+    shipGroup.add(laserPod);
+
+    // Visual micro flare particles emitting from engines
+    for (let i = 0; i < 4; i++) {
+      const p = new THREE.Mesh(
+        new THREE.SphereGeometry(0.24, 4, 4),
+        new THREE.MeshBasicMaterial({ color: 0x06b6d4, transparent: true, opacity: 0.7 })
+      );
+      p.position.set((Math.random() - 0.5) * 0.8, -0.1, -3.8 - i * 0.75);
+      shipGroup.add(p);
+    }
 
     // Landing gear struts
     const landingGearsGroup = new THREE.Group();

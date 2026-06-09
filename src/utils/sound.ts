@@ -297,6 +297,61 @@ class SoundEngine {
     });
   }
 
+  playAchievementUnlock() {
+    this.resume();
+    if (!this.ctx || !this.masterGain) return;
+
+    const t = this.ctx.currentTime;
+    
+    // Low epic sub bass drop
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'triangle';
+    subOsc.frequency.setValueAtTime(80, t);
+    subOsc.frequency.linearRampToValueAtTime(30, t + 1.2);
+    subGain.gain.setValueAtTime(0.25, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+    subOsc.connect(subGain);
+    subGain.connect(this.masterGain);
+    subOsc.start(t);
+    subOsc.stop(t + 1.3);
+
+    // Majestic ascending brass chords (C4 -> F4 -> G4 -> C5 triumph)
+    const chords = [
+      [261.63, 329.63, 392.00],        // C4, E4, G4
+      [293.66, 369.99, 440.00],        // D4, F#4, A4
+      [392.00, 493.88, 587.33],        // G4, B4, D5
+      [523.25, 659.25, 783.99, 1046.50] // C5, E5, G5, C6 (Ascending high chimes)
+    ];
+
+    chords.forEach((chord, chordIdx) => {
+      const chordTime = t + chordIdx * 0.16;
+      chord.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const filter = this.ctx!.createBiquadFilter();
+
+        osc.type = chordIdx === 3 ? 'sawtooth' : 'sine';
+        osc.frequency.setValueAtTime(freq, chordTime);
+        osc.detune.setValueAtTime((idx - 1) * 6, chordTime); // detuning for warm space vibe
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(2500, chordTime);
+        filter.frequency.exponentialRampToValueAtTime(600, chordTime + 0.6);
+
+        gain.gain.setValueAtTime(0.06, chordTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, chordTime + 0.65);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.masterGain!);
+
+        osc.start(chordTime);
+        osc.stop(chordTime + 0.7);
+      });
+    });
+  }
+
   startAmbient() {
     this.resume();
     if (!this.ctx || !this.masterGain) return;
