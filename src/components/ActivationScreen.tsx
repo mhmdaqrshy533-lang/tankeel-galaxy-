@@ -59,8 +59,8 @@ export default function ActivationScreen({ onActivate, activeLanguage }: Activat
       } else {
         setErrorMess(
           ar 
-            ? 'خطأ: رمز تفعيل الحماية غير صحيح أو منتهي الصيانة! رمز 715846133 للوضع العادي، ورقم 715562996 لوضع الماستر' 
-            : 'Error: Code invalid! Type 715846133 for normal, or 715562996 for MASTER mode.'
+            ? 'تم رفض الوصول: رمز تفعيل الحماية غير صحيح!' 
+            : 'ACCESS DENIED: Invalid activation code.'
         );
         sound.playClick(); // warning click
       }
@@ -97,10 +97,7 @@ export default function ActivationScreen({ onActivate, activeLanguage }: Activat
         {/* ENGINEER BRANDING ACCORDING TO USER'S LITERAL REQUEST */}
         <div className="mt-2 md:mt-0 px-4 py-1.5 bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/30 rounded-lg text-center backdrop-blur-sm shadow-[0_0_15px_rgba(16,185,129,0.1)]">
           <span className="text-[10px] text-neutral-400 block font-mono">
-            {ar ? 'برمجة وتطوير وإشراف هندسي' : 'Supervision & Core Programming'}
-          </span>
-          <span className="text-xs font-bold text-emerald-300 font-sans">
-            {ar ? 'المهندس / سهيل الهزبري' : 'Eng. Suhail Al-Huzbari'}
+            {ar ? 'برمجة المهندس/ سهيل الهزبري' : 'Engine Architecture by Engineer Suhail Al-Hazbari'}
           </span>
         </div>
       </div>
@@ -230,7 +227,7 @@ export default function ActivationScreen({ onActivate, activeLanguage }: Activat
 
       {/* Footer Branding Credit */}
       <div className="w-full text-center border-t border-white/5 pt-2 z-10 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-1 text-[10px] text-neutral-500 font-mono">
-        <span>© 2026 TANKEEL INC. {ar ? 'جميع الحقوق للمهندس سهيل الهزبري محفوظة' : 'UNDER POWER OF SUHAIL AL-HUZBARI.'}</span>
+        <span>© 2026 TANKEEL INC. {ar ? 'برمجة المهندس/ سهيل الهزبري' : 'ENGINE ARCHITECTURE BY ENGINEER SUHAIL AL-HAZBARI'}</span>
         <span className="text-emerald-500/70 font-semibold">{ar ? 'نظام الحوسبة والألعاب الفضائية v4' : 'WEBGL FLUID INTERFACE'}</span>
       </div>
     </div>

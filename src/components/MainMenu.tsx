@@ -143,11 +143,14 @@ export default function MainMenu({
         </p>
       </div>
 
-      {/* Centered Actions Dashboard Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-4xl w-full my-4 z-10">
+      {/* Centered Actions Dashboard Grid with Glassmorphism */}
+      <div className="glass-panel p-6 rounded-2xl grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl w-full my-4 z-10">
         {menuItems.map((item, index) => {
           const IconComponent = item.icon;
           const isDisabled = item.disabled;
+          // Apply cyber-btn for starter, cyber-btn-amber for main garage items
+          const isAmberItem = item.id === 'GARAGE' || item.id === 'ACHIEVEMENTS';
+          const buttonClass = isAmberItem ? 'cyber-btn-amber' : 'cyber-btn';
 
           return (
             <button
@@ -161,8 +164,8 @@ export default function MainMenu({
               onMouseEnter={() => {
                 if (!isDisabled) sound.playHover();
               }}
-              className={`group flex flex-col justify-between p-4 rounded-xl border text-left cursor-pointer transition-all duration-300 transform hover:-translate-y-1 relative bg-gradient-to-b overflow-hidden ${item.color} ${
-                isDisabled ? 'cursor-not-allowed text-neutral-500' : 'hover:shadow-[0_0_15px_rgba(255,255,255,0.05)] active:scale-95'
+              className={`group flex flex-col justify-between p-4 text-left cursor-pointer transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden ${buttonClass} ${
+                isDisabled ? 'opacity-30 cursor-not-allowed border-neutral-700!' : 'active:scale-95'
               }`}
             >
               {/* Internal warning lines background decor */}
@@ -172,7 +175,7 @@ export default function MainMenu({
 
               {/* Header inside button */}
               <div className="flex items-center justify-between w-full mb-4">
-                <div className={`p-2 rounded-lg bg-neutral-900 border border-white/5 group-hover:scale-110 transition-all duration-300 ${item.textColor}`}>
+                <div className={`p-2 rounded-lg bg-neutral-900/90 border border-white/5 group-hover:scale-110 transition-all duration-300 ${item.textColor}`}>
                   <IconComponent className="w-5 h-5" />
                 </div>
                 {item.badgeAr && (
@@ -188,7 +191,7 @@ export default function MainMenu({
                 <span className={`text-[10px] font-mono tracking-widest text-neutral-500 uppercase ${isDisabled ? '' : 'group-hover:text-neutral-400'}`}>
                   {item.id}
                 </span>
-                <span className="text-sm font-bold text-neutral-100 mt-1 transition-colors group-hover:text-white">
+                <span className="text-sm font-bold text-neutral-100 mt-1 transition-colors group-hover:text-white font-sans">
                   {activeLanguage === 'ar' ? item.labelAr : item.labelEn}
                 </span>
                 <span className="text-[10px] text-neutral-400 font-mono leading-tight mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">

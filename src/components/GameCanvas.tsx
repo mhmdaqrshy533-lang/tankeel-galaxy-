@@ -7,7 +7,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { 
   Shield, Heart, Zap, Crosshair, ArrowLeftRight, Landmark, Navigation2, 
-  RotateCcw, Compass, Trophy, Play, CheckCircle
+  RotateCcw, Compass, Trophy, Play, CheckCircle, Eye, Music, Headphones
 } from 'lucide-react';
 import { 
   PlayerStats, Weapon, WeaponId, VehicleId, MissionId, PlanetId, GameSettings, Vehicle
@@ -53,6 +53,14 @@ export default function GameCanvas({
   const [playerShield, setPlayerShield] = useState(100);
   const [playerEnergy, setPlayerEnergy] = useState(100);
 
+  const [isSniperMode, setIsSniperMode] = useState(false);
+  const [sniperScanProgress, setSniperScanProgress] = useState(0);
+  const [currentLevel, setCurrentLevel] = useState(() => {
+    const saved = localStorage.getItem('tankeel_player_level');
+    return saved ? parseInt(saved, 10) : 1;
+  });
+  const [currentAltitude, setCurrentAltitude] = useState(0);
+
   const [crystalsCollected, setCrystalsCollected] = useState(0);
   const [enemiesDefeated, setEnemiesDefeated] = useState(0);
   const [baseStatus, setBaseStatus] = useState<'OFFLINE' | 'ONLINE'>('OFFLINE');
@@ -62,6 +70,16 @@ export default function GameCanvas({
   const [activePilotType, setActivePilotType] = useState<'character' | 'buggy' | 'spaceship'>('character');
 
   const [gameOver, setGameOver] = useState<'victory' | 'defeat' | null>(null);
+
+  // Cockpit Music Controller & Hardware warning states
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [showHeadphonesWarning, setShowHeadphonesWarning] = useState(false);
+
+  // Client multi-peer hotspot network states
+  const [clientId] = useState(() => 'pilot_' + Math.random().toString(36).substring(2, 9));
+  const [activePeers, setActivePeers] = useState<{ [id: string]: { name: string; pos: [number, number, number]; rotY: number; hp: number; isFiring: boolean; pilotType: string; timestamp: number } }>({});
+  const [showTankeelAlert, setShowTankeelAlert] = useState(false);
+  const [tankeelAlertText, setTankeelAlertText] = useState({ ar: '', en: '' });
 
   // References to keep data available inside the ThreeJS thread safely
   const stateRef = useRef({
@@ -83,6 +101,10 @@ export default function GameCanvas({
     cameraZoom: 1,
     activeWeaponId: stats.currentWeapon,
     droneCombatTimer: 0,
+    isSniper: false, // sniper scope active state
+    peers: {} as { [peerId: string]: { id: string; name: string; mesh: THREE.Group; hp: number; targetPos: THREE.Vector3; targetRotY: number; pilotType: string; isFiring: boolean; lastUpdate: number } },
+    meshFrozen: false,
+    shakeIntensity: 0
   });
 
   // Track coordinates for mini-map telemetry
@@ -142,6 +164,31 @@ export default function GameCanvas({
     stateRef.current.inputs.a = false;
     stateRef.current.inputs.d = false;
     stateRef.current.touchVector = { x: 0, y: 0 };
+  };
+
+  const handleCockpitMusicToggle = async () => {
+    sound.playClick();
+    if (!isMusicPlaying) {
+      // Async hardware-sensing for wired headsets
+      const hasHeadphones = await sound.checkWiredHeadphones();
+      if (!hasHeadphones) {
+        // Block the interface with military glassmorphic pop-up warning
+        setShowHeadphonesWarning(true);
+        return;
+      }
+      sound.startTribalZamilSynth();
+      setIsMusicPlaying(true);
+    } else {
+      sound.stopTribalZamilSynth();
+      setIsMusicPlaying(false);
+    }
+  };
+
+  const forceStartCockpitMusic = () => {
+    sound.playLevelUp();
+    sound.startTribalZamilSynth();
+    setIsMusicPlaying(true);
+    setShowHeadphonesWarning(false);
   };
 
   // Switch pilot modes (on board/ride vehicles)
@@ -223,6 +270,72 @@ export default function GameCanvas({
     }, 150);
   };
 
+  // Sniper auto-scan Area Clearance -> Level 2 Progression
+  useEffect(() => {
+    let scanInterval: any = null;
+    if (isSniperMode && activePilotType === 'spaceship') {
+      scanInterval = setInterval(() => {
+        setSniperScanProgress(prev => {
+          if (prev >= 100) {
+            clearInterval(scanInterval);
+            // Promoted to Level 2
+            const newLevel = 2;
+            setCurrentLevel(newLevel);
+            localStorage.setItem('tankeel_player_level', newLevel.toString());
+            sound.playLevelUp();
+            setIsSniperMode(false);
+            stateRef.current.isSniper = false;
+            return 0; // reset
+          }
+          return prev + 10;
+        });
+      }, 500);
+    } else {
+      setSniperScanProgress(0);
+    }
+    return () => clearInterval(scanInterval);
+  }, [isSniperMode, activePilotType]);
+
+  // sync active peers from ThreeJS ref into React state for HUD status panels
+  useEffect(() => {
+    const peerSyncTimer = setInterval(() => {
+      const livePeers: typeof activePeers = {};
+      Object.keys(stateRef.current.peers).forEach(id => {
+        const p = stateRef.current.peers[id];
+        livePeers[id] = {
+          name: p.name,
+          pos: [p.mesh.position.x, p.mesh.position.y, p.mesh.position.z],
+          rotY: p.mesh.rotation.y,
+          hp: p.hp,
+          isFiring: p.isFiring,
+          pilotType: p.pilotType,
+          timestamp: p.lastUpdate
+        };
+      });
+      setActivePeers(livePeers);
+    }, 250);
+    return () => clearInterval(peerSyncTimer);
+  }, []);
+
+  const triggerTankeelOverdriveKillFeed = (killer: string, victim: string) => {
+    sound.triggerTankeelExplosion();
+    
+    setTankeelAlertText({
+      ar: `اصطدام قاتِل! تم التنكيل بـ [${victim}] بواسطة الطيار [${killer}]`,
+      en: `Direct Hit! Tankeel Overdrive Executed on [${victim}] by Pilot [${killer}]`
+    });
+    
+    stateRef.current.shakeIntensity = 2.8; 
+    stateRef.current.meshFrozen = true;
+    setShowTankeelAlert(true);
+    
+    setTimeout(() => {
+      stateRef.current.meshFrozen = false;
+      stateRef.current.shakeIntensity = 0;
+      setShowTankeelAlert(false);
+    }, 4200);
+  };
+
   // Main interactive Three.js container loop
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -249,6 +362,193 @@ export default function GameCanvas({
     // Group to hold all mission objects
     const worldGroup = new THREE.Group();
     scene.add(worldGroup);
+
+    // DECENTRALIZED MULTIPLAYER LOCAL HOTSPOT MESH GATEWAY
+    const peersGroup = new THREE.Group();
+    worldGroup.add(peersGroup);
+
+    const meshChannel = new BroadcastChannel('tankeel_galactic_mesh');
+
+    // Factory to construct 3D peer geometries representable in WebGL space
+    const createPeerModel = (pilotType: string, customColor: string) => {
+      const g = new THREE.Group();
+      if (pilotType === 'spaceship') {
+        // High-Fidelity 3D Stealth Jet Fighter structure
+        const body = new THREE.Mesh(
+          new THREE.ConeGeometry(1.2, 5.0, 4),
+          new THREE.MeshStandardMaterial({ color: 0x0a0d14, metalness: 0.95, roughness: 0.15 })
+        );
+        body.rotation.x = Math.PI / 2;
+        g.add(body);
+
+        const wings = new THREE.Mesh(
+          new THREE.BoxGeometry(4.4, 0.08, 1.8),
+          new THREE.MeshStandardMaterial({ color: customColor, metalness: 0.9 })
+        );
+        wings.position.set(0, -0.05, -0.4);
+        g.add(wings);
+
+        const canopy = new THREE.Mesh(
+          new THREE.SphereGeometry(0.42, 6, 6),
+          new THREE.MeshStandardMaterial({ color: 0x06b6d4, transparent: true, opacity: 0.85 })
+        );
+        canopy.position.set(0, 0.25, 0.7);
+        canopy.scale.set(0.8, 0.5, 1.6);
+        g.add(canopy);
+
+        // underbelly propulsion vents
+        const ventL = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.2, 0.22, 0.9, 5),
+          new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8 })
+        );
+        ventL.position.set(-0.35, -0.32, -1.1);
+        ventL.rotation.x = Math.PI / 2;
+        g.add(ventL);
+
+        const ventR = ventL.clone();
+        ventR.position.x = 0.35;
+        g.add(ventR);
+
+        // integrated missile rails on wings
+        const railL = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.1, 1.8),
+          new THREE.MeshStandardMaterial({ color: 0x475569 })
+        );
+        railL.position.set(-1.9, -0.1, -0.4);
+        g.add(railL);
+
+        const railR = railL.clone();
+        railR.position.x = 1.9;
+        g.add(railR);
+      } else if (pilotType === 'buggy') {
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(2.4, 0.7, 3.8),
+          new THREE.MeshStandardMaterial({ color: customColor, metalness: 0.8, roughness: 0.3 })
+        );
+        g.add(body);
+
+        const cab = new THREE.Mesh(
+          new THREE.BoxGeometry(1.6, 0.7, 1.9),
+          new THREE.MeshStandardMaterial({ color: 0x0e172a, roughness: 0.1 })
+        );
+        cab.position.set(0, 0.7, 0);
+        g.add(cab);
+      } else {
+        // character soldier
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(0.9, 1.6, 0.9),
+          new THREE.MeshStandardMaterial({ color: customColor, metalness: 0.3 })
+        );
+        body.position.y = 0.8;
+        g.add(body);
+
+        const head = new THREE.Mesh(
+          new THREE.SphereGeometry(0.32, 6, 6),
+          new THREE.MeshStandardMaterial({ color: 0xffdfba })
+        );
+        head.position.y = 1.75;
+        g.add(head);
+
+        // dual-language backplate mesh for peers
+        const backplate = new THREE.Mesh(
+          new THREE.BoxGeometry(0.7, 0.7, 0.12),
+          new THREE.MeshStandardMaterial({ color: 0x050505 })
+        );
+        backplate.position.set(0, 0.9, -0.48);
+        g.add(backplate);
+      }
+
+      // Floating nameplate sprite above the pilot
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 64;
+      const tex = new THREE.CanvasTexture(canvas);
+      const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.position.y = pilotType === 'spaceship' ? 2.2 : 1.9;
+      sprite.scale.set(3.2, 0.8, 1.0);
+      g.add(sprite);
+
+      return { group: g, sprite };
+    };
+
+    // Render floating text metrics for active multiplayer components
+    const updatePeerLabel = (sprite: THREE.Sprite, name: string, hp: number) => {
+      const canvas = sprite.material.map?.image as HTMLCanvasElement;
+      if (!canvas) return;
+      const tc = canvas.getContext('2d');
+      if (tc) {
+        tc.clearRect(0, 0, 256, 64);
+        tc.fillStyle = 'rgba(2, 4, 12, 0.75)';
+        tc.beginPath();
+        tc.roundRect(0, 0, 256, 64, 12);
+        tc.fill();
+        
+        tc.lineWidth = 1.8;
+        tc.strokeStyle = '#06b6d4';
+        tc.stroke();
+
+        tc.fillStyle = '#06b6d4';
+        tc.font = 'bold 15px monospace';
+        tc.textAlign = 'center';
+        tc.fillText(name, 128, 23);
+
+        // HP dynamic progress indicator bar
+        tc.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        tc.fillRect(28, 40, 200, 10);
+        tc.fillStyle = hp > 35 ? '#10b981' : '#ef4444';
+        tc.fillRect(28, 40, 200 * (Math.max(0, hp) / 100), 10);
+      }
+      if (sprite.material.map) {
+        sprite.material.map.needsUpdate = true;
+      }
+    };
+
+    // Sockets packet receiver & synchronization
+    meshChannel.onmessage = (event) => {
+      const msg = event.data;
+      if (!msg) return;
+
+      if (msg.type === 'state') {
+        const id = msg.clientId;
+        if (id === clientId) return;
+
+        const peers = stateRef.current.peers;
+        if (!peers[id]) {
+          const modelData = createPeerModel(msg.pilotType, '#d946ef');
+          peersGroup.add(modelData.group);
+          
+          peers[id] = {
+            id,
+            name: msg.name,
+            mesh: modelData.group,
+            hp: msg.hp,
+            targetPos: new THREE.Vector3(...msg.pos),
+            targetRotY: msg.rotY,
+            pilotType: msg.pilotType,
+            isFiring: msg.isFiring,
+            lastUpdate: Date.now()
+          };
+          updatePeerLabel(modelData.sprite, msg.name, msg.hp);
+        } else {
+          const peer = peers[id];
+          peer.targetPos.set(...msg.pos);
+          peer.targetRotY = msg.rotY;
+          peer.lastUpdate = Date.now();
+          peer.isFiring = msg.isFiring;
+          
+          if (peer.hp !== msg.hp || peer.name !== msg.name) {
+            peer.hp = msg.hp;
+            const sprite = peer.mesh.children.find(c => c instanceof THREE.Sprite) as THREE.Sprite;
+            if (sprite) {
+              updatePeerLabel(sprite, msg.name, msg.hp);
+            }
+          }
+        }
+      } else if (msg.type === 'tankeel_kill') {
+        triggerTankeelOverdriveKillFeed(msg.killerName, msg.killedName);
+      }
+    };
 
     // Ambient Starfield
     const starCount = settings.graphicsQuality === 'low' ? 300 : 1200;
@@ -286,12 +586,107 @@ export default function GameCanvas({
     scene.add(dirLight);
 
     // Giant background rotating sphere for Planet Mercury-X / atmosphere outer rim visual
+    // Procedurally create a photorealistic gray cratered astronomical texture with cyan plasma fractures and amber radar markings
+    const createMercuryTexture = () => {
+      const size = 512;
+      const tCanvas = document.createElement('canvas');
+      tCanvas.width = size;
+      tCanvas.height = size;
+      const ctx = tCanvas.getContext('2d')!;
+
+      // Deep dark charcoal gray base soil
+      ctx.fillStyle = '#2c2d2f';
+      ctx.fillRect(0, 0, size, size);
+
+      // Fine astronomical asteroid grains/noise shade
+      for (let i = 0; i < 4000; i++) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const r = Math.random() * 1.5 + 0.5;
+        const col = Math.floor(Math.random() * 32 - 16) + 40;
+        ctx.fillStyle = `rgb(${col}, ${col}, ${col})`;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Procedural craters (shaded inner rings & flat sun highlights)
+      for (let i = 0; i < 35; i++) {
+        const cx = Math.random() * size;
+        const cy = Math.random() * size;
+        const cr = Math.random() * 40 + 6;
+
+        ctx.strokeStyle = '#121213'; // shadow rim
+        ctx.lineWidth = cr * 0.15;
+        ctx.beginPath();
+        ctx.arc(cx + cr * 0.08, cy + cr * 0.08, cr, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#4b4d50'; // light rim
+        ctx.lineWidth = cr * 0.08;
+        ctx.beginPath();
+        ctx.arc(cx - cr * 0.06, cy - cr * 0.06, cr, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#1e1f20'; // crater center shadow
+        ctx.beginPath();
+        ctx.arc(cx, cy, cr - 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Deep Neon cyan plasma fracture lines representing electromagnetic anomaly Layer
+      ctx.shadowColor = '#06b6d4';
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 10; i++) {
+        ctx.beginPath();
+        let sx = Math.random() * size;
+        let sy = Math.random() * size;
+        ctx.moveTo(sx, sy);
+        for (let j = 0; j < 4; j++) {
+          sx += (Math.random() - 0.5) * 120;
+          sy += (Math.random() - 0.5) * 120;
+          ctx.lineTo(sx, sy);
+        }
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0; // reset
+
+      // Amber tactical telemetry grids on planetary surface
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 6;
+      ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
+      ctx.lineWidth = 1.0;
+      for (let i = 0; i < 2; i++) {
+        const rx = Math.random() * size;
+        const ry = Math.random() * size;
+        const rad = Math.random() * 50 + 20;
+        ctx.beginPath();
+        ctx.arc(rx, ry, rad, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(rx - rad - 5, ry);
+        ctx.lineTo(rx + rad + 5, ry);
+        ctx.moveTo(rx, ry - rad - 5);
+        ctx.lineTo(rx, ry + rad + 5);
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0; // reset
+
+      return new THREE.CanvasTexture(tCanvas);
+    };
+
+    const planetTex = createMercuryTexture();
     const planetBody = new THREE.Mesh(
       new THREE.SphereGeometry(65, 32, 32),
       new THREE.MeshStandardMaterial({
-        color: 0x442211,
-        roughness: 0.95,
-        metalness: 0.1,
+        map: planetTex,
+        roughness: 0.9,
+        metalness: 0.25,
+        emissive: 0x052e3b, // subtle cyan glow feedback
+        emissiveMap: planetTex,
       })
     );
     planetBody.position.set(0, -66, -30); // positioned right below plane terrain
@@ -301,26 +696,43 @@ export default function GameCanvas({
     const landscapeRes = 48;
     const terrainGeo = new THREE.PlaneGeometry(160, 160, landscapeRes, landscapeRes);
     
-    // displace vertices procedurally to make canyons, ridges and craters
+    // displace vertices procedurally to make jagged mountains, deep valleys, canyons, and craters
     const vertPos = terrainGeo.attributes.position;
     for (let i = 0; i < vertPos.count; i++) {
       const vx = vertPos.getX(i);
       const vy = vertPos.getY(i);
       
       // mathematical wave displacement
-      let zVal = Math.sin(vx * 0.08) * Math.cos(vy * 0.08) * 3;
-      zVal += Math.cos(vx * 0.03) * Math.sin(vy * 0.03) * 6; // canyons
+      let zVal = Math.sin(vx * 0.06) * Math.cos(vy * 0.06) * 6.5; // taller step hills/cliffs
+      zVal += Math.cos(vx * 0.12) * Math.sin(vy * 0.12) * 3.0; // high frequency rough rocks
       
-      // crater punch simulation
+      // jagged mountain cliffs on border matrix
+      if (Math.abs(vx) > 30 || Math.abs(vy) > 30) {
+        zVal += Math.sign(vx) * 8.0 * Math.pow(Math.abs(vx) / 75, 2);
+      }
+      
+      // deep physical craters displacement
+      const craterDist1 = Math.sqrt((vx - 20) ** 2 + (vy - 20) ** 2);
+      if (craterDist1 < 15) {
+        zVal -= (15 - craterDist1) * 0.8;
+      }
+
+      const craterDist2 = Math.sqrt((vx + 35) ** 2 + (vy - 10) ** 2);
+      if (craterDist2 < 20) {
+        zVal -= (20 - craterDist2) * 0.9;
+      }
+      
+      // crater punch simulation for communications base
       const distFromBase = Math.sqrt((vx + 15) ** 2 + (vy + 25) ** 2);
       if (distFromBase < 18) {
-        // flatten abandoned base area craters nearby
+        // flatten base area
         zVal *= (distFromBase / 18);
       }
       
       vertPos.setZ(i, zVal);
     }
     terrainGeo.computeVertexNormals();
+
 
     const terrainMat = new THREE.MeshStandardMaterial({
       color: 0x2c1f18, // charcoal red rock desert Mercurial soil
@@ -336,9 +748,24 @@ export default function GameCanvas({
 
     // Helper height getter for smooth physical character placement on terrain heightmaps
     const getTerrainHeight = (x: number, z: number) => {
-      // simple linear approximation of noise height value:
-      let hVal = Math.sin(x * 0.08) * Math.cos(z * 0.08) * 3;
-      hVal += Math.cos(x * 0.03) * Math.sin(z * 0.03) * 6;
+      // align with dynamic step hills/cliffs vertices calculations
+      let hVal = Math.sin(x * 0.06) * Math.cos(z * 0.06) * 6.5;
+      hVal += Math.cos(x * 0.12) * Math.sin(z * 0.12) * 3.0;
+      
+      if (Math.abs(x) > 30 || Math.abs(z) > 30) {
+        hVal += Math.sign(x) * 8.0 * Math.pow(Math.abs(x) / 75, 2);
+      }
+      
+      const craterDist1 = Math.sqrt((x - 20) ** 2 + (z - 20) ** 2);
+      if (craterDist1 < 15) {
+        hVal -= (15 - craterDist1) * 0.8;
+      }
+
+      const craterDist2 = Math.sqrt((x + 35) ** 2 + (z - 10) ** 2);
+      if (craterDist2 < 20) {
+        hVal -= (20 - craterDist2) * 0.9;
+      }
+
       const baseDist = Math.sqrt((x + 15) ** 2 + (z + 25) ** 2);
       if (baseDist < 18) hVal *= (baseDist / 18);
       return hVal - 1.5;
@@ -560,12 +987,13 @@ export default function GameCanvas({
     const playerGroup = new THREE.Group();
     playerGroup.position.set(15, getTerrainHeight(15, -15), -15);
 
+    // Shifting torso and head upwards to allow dedicated lower limbs legs
     // Glossy metallic Power armor torso
     const armorSuit = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.7, 0.5, 1.8, 6),
+      new THREE.CylinderGeometry(0.7, 0.5, 1.4, 6),
       new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.9, roughness: 0.15 })
     );
-    armorSuit.position.y = 0.9;
+    armorSuit.position.y = 1.35; // shifted up
     playerGroup.add(armorSuit);
 
     // Glowing electronic helmet/visor
@@ -573,25 +1001,90 @@ export default function GameCanvas({
       new THREE.SphereGeometry(0.55, 6, 6),
       new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.8, roughness: 0.2 })
     );
-    helmet.position.y = 2.1;
+    helmet.position.y = 2.45; // shifted up corresponding to torso
     playerGroup.add(helmet);
 
     const visorGlow = new THREE.Mesh(
       new THREE.BoxGeometry(0.65, 0.2, 0.4),
       new THREE.MeshBasicMaterial({ color: 0x06b6d4 }) // cyan glowing visor line
     );
-    visorGlow.position.set(0, 2.1, 0.45);
+    visorGlow.position.set(0, 2.45, 0.45);
     playerGroup.add(visorGlow);
 
     // Suit jetpack cylinder
     const jetpack = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.32, 0.32, 1.2, 5),
+      new THREE.CylinderGeometry(0.32, 0.32, 1.1, 5),
       new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.7 })
     );
-    jetpack.position.set(0, 1.0, -0.55);
+    jetpack.position.set(0, 1.4, -0.55);
     playerGroup.add(jetpack);
 
+    // DEDICATED LOWER-LIMB STRUCTURES (رجلين) for running/walking animation cycles
+    const legLGroup = new THREE.Group();
+    legLGroup.position.set(-0.32, 0.75, 0);
+    const legL = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.12, 0.8, 5),
+      new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.8, roughness: 0.3 })
+    );
+    legL.position.y = -0.4;
+    legLGroup.add(legL);
+    playerGroup.add(legLGroup);
+
+    const legRGroup = new THREE.Group();
+    legRGroup.position.set(0.32, 0.75, 0);
+    const legR = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.12, 0.8, 5),
+      new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.8, roughness: 0.3 })
+    );
+    legR.position.y = -0.4;
+    legRGroup.add(legR);
+    playerGroup.add(legRGroup);
+
+    // CUSTOM CANVAS TACTICAL BALLISTIC VEST BACKPLATE
+    const createVestBackplateTexture = () => {
+      const vCanvas = document.createElement('canvas');
+      vCanvas.width = 256;
+      vCanvas.height = 128;
+      const vCtx = vCanvas.getContext('2d')!;
+
+      // Deep military carbon black background
+      vCtx.fillStyle = '#111827';
+      vCtx.fillRect(0, 0, 256, 128);
+
+      // Warning hazard borders
+      vCtx.fillStyle = '#eab308'; // Amber border
+      vCtx.fillRect(8, 8, 240, 6);
+      vCtx.fillStyle = '#ef4444'; // Red stripe
+      vCtx.fillRect(8, 114, 240, 6);
+
+      // Arabic Title "تنكيل"
+      vCtx.fillStyle = '#f8fafc';
+      vCtx.font = 'bold 30px system-ui, sans-serif';
+      vCtx.textAlign = 'center';
+      vCtx.fillText('تَـنْـكِـيـل', 128, 52);
+
+      // English Title "TANKEEL"
+      vCtx.fillStyle = '#22d3ee'; // Neon Cyan
+      vCtx.font = 'bold 20px monospace';
+      vCtx.fillText('TANKEEL', 128, 92);
+
+      return new THREE.CanvasTexture(vCanvas);
+    };
+
+    const vestBackplateTex = createVestBackplateTexture();
+    const vestBackplate = new THREE.Mesh(
+      new THREE.BoxGeometry(0.85, 1.0, 0.1),
+      new THREE.MeshStandardMaterial({
+        map: vestBackplateTex,
+        roughness: 0.75,
+        metalness: 0.1,
+      })
+    );
+    vestBackplate.position.set(0, 1.35, -0.42); // attach flush centered on torso's back
+    playerGroup.add(vestBackplate);
+
     worldGroup.add(playerGroup);
+
 
     // 5. Crystals collection items
     const crystalGroup = new THREE.Group();
@@ -641,32 +1134,45 @@ export default function GameCanvas({
     }[] = [];
 
     const spawnEnemies = () => {
-      // spawns dynamic entities depending on mission difficulty
+      // spawns dynamic entities depending on mission difficulty and player levels (المستوى الثاني)
+      const levelMultiplier = stats.level > 1 ? 1.5 : 1.0;
+      const speedMultiplier = stats.level > 1 ? 1.25 : 1.0;
+
       const specs: { x: number; z: number; type: 'ghost' | 'stone' | 'drone' | 'boss'; hp: number; speed: number }[] = [
-        { x: -5, z: 8, type: 'ghost', hp: 30, speed: 0.05 },
-        { x: 18, z: 5, type: 'ghost', hp: 30, speed: 0.05 },
-        { x: -10, z: -18, type: 'stone', hp: 60, speed: 0.02 },
-        { x: -28, z: -28, type: 'drone', hp: 25, speed: 0.04 },
+        { x: -5, z: 8, type: 'ghost', hp: Math.round(30 * levelMultiplier), speed: 0.05 * speedMultiplier },
+        { x: 18, z: 5, type: 'ghost', hp: Math.round(30 * levelMultiplier), speed: 0.05 * speedMultiplier },
+        { x: -10, z: -18, type: 'stone', hp: Math.round(60 * levelMultiplier), speed: 0.02 * speedMultiplier },
+        { x: -28, z: -28, type: 'drone', hp: Math.round(25 * levelMultiplier), speed: 0.04 * speedMultiplier },
       ];
 
       // Add extra if medium or hard
       if (missionId !== 'exploration') {
         specs.push(
-          { x: -16, z: -32, type: 'drone', hp: 25, speed: 0.04 },
-          { x: 3, z: -15, type: 'stone', hp: 60, speed: 0.02 },
-          { x: -30, z: 2, type: 'ghost', hp: 30, speed: 0.05 },
-          { x: -12, z: -2, type: 'stone', hp: 60, speed: 0.02 }
+          { x: -16, z: -32, type: 'drone', hp: Math.round(25 * levelMultiplier), speed: 0.04 * speedMultiplier },
+          { x: 3, z: -15, type: 'stone', hp: Math.round(60 * levelMultiplier), speed: 0.02 * speedMultiplier },
+          { x: -30, z: 2, type: 'ghost', hp: Math.round(30 * levelMultiplier), speed: 0.05 * speedMultiplier },
+          { x: -12, z: -2, type: 'stone', hp: Math.round(60 * levelMultiplier), speed: 0.02 * speedMultiplier }
+        );
+      }
+
+      // Add advanced High-Altitude fighter drones if Level 2 is unlocked!
+      if (stats.level > 1) {
+        specs.push(
+          { x: -5, z: -15, type: 'drone', hp: 40, speed: 0.06 },
+          { x: 20, z: -22, type: 'drone', hp: 40, speed: 0.06 }
         );
       }
 
       // Add Boss Golem if HARD BOSS FIGHT
       if (missionId === 'boss_fight') {
         specs.push({
-          x: -15, z: -42, type: 'boss', hp: 350, speed: 0.015
+          x: -15, z: -42, type: 'boss', hp: Math.round(350 * levelMultiplier), speed: 0.015 * speedMultiplier
         });
-        stateRef.current.bossHp = 350;
-        setBossHp(350);
+        const finalBossHp = Math.round(350 * levelMultiplier);
+        stateRef.current.bossHp = finalBossHp;
+        setBossHp(finalBossHp);
       }
+
 
       specs.forEach((sp) => {
         const wrap = new THREE.Group();
@@ -802,10 +1308,129 @@ export default function GameCanvas({
     const renderLoop = () => {
       reqId = requestAnimationFrame(renderLoop);
 
-      const delta = Math.min(0.05, clock.getDelta());
+      const rawDelta = Math.min(0.05, clock.getDelta());
+      const delta = stateRef.current.meshFrozen ? 0 : rawDelta;
       
       const inputs = stateRef.current.inputs;
       const step = stateRef.current.cinematicStep;
+
+      // HIGH PERFORMANCE PEER COORDINATES BROADCAST CHANNELS
+      const nowMs = Date.now();
+      if (!(window as any).__lastTankeelBroadcast) {
+        (window as any).__lastTankeelBroadcast = 0;
+      }
+      if (nowMs - (window as any).__lastTankeelBroadcast > 50 && cinematicStep === 'NONE' && !stateRef.current.meshFrozen) {
+        (window as any).__lastTankeelBroadcast = nowMs;
+        let activeEntityObj: THREE.Object3D | null = null;
+        if (stateRef.current.activePilotType === 'character') activeEntityObj = playerGroup;
+        else if (stateRef.current.activePilotType === 'buggy') activeEntityObj = buggyGroup;
+        else activeEntityObj = shipGroup;
+
+        if (activeEntityObj) {
+          meshChannel.postMessage({
+            type: 'state',
+            clientId: clientId,
+            name: stats.isMasterMode 
+              ? (ar ? 'المهندس سهيل الهزبري' : 'Eng. Suhail Al-Hazbari')
+              : (ar ? 'الطيار التكتيكي ألفا' : 'Pilot Tactical Alpha'),
+            pos: [activeEntityObj.position.x, activeEntityObj.position.y, activeEntityObj.position.z],
+            rotY: activeEntityObj.rotation.y,
+            pilotType: stateRef.current.activePilotType,
+            isFiring: (window as any).__triggerLaserShot || inputs.space,
+            hp: stateRef.current.playerHp,
+            timestamp: nowMs
+          });
+          (window as any).__triggerLaserShot = false;
+        }
+      }
+
+      // SIMULATED COOPERATIVE PILOTS SIMULATOR & REMOTE PEERS INTERPOLATOR
+      if (!(window as any).__simulatedPilotsSetup) {
+        (window as any).__simulatedPilotsSetup = true;
+        (window as any).__simulatedSpawnTime = nowMs;
+      }
+      const peerKeysList = Object.keys(stateRef.current.peers);
+      if (peerKeysList.filter(k => !k.startsWith('sim_')).length === 0 && nowMs - (window as any).__simulatedSpawnTime > 2500 && cinematicStep === 'NONE') {
+        // Safe to populate active battlefield with 2 simulated peer pilots!
+        const bNames = ar 
+          ? ['العميد الفضائي رعد', 'مطور اللعبة روبوت ميكا'] 
+          : ['Spacer Commander Raad', 'Tankeel Mech Autopilot'];
+          
+        const configs = [
+          { id: 'sim_1', name: bNames[0], color: '#3b82f6', pos: [-25, 24, 10], type: 'spaceship' },
+          { id: 'sim_2', name: bNames[1], color: '#f97316', pos: [35, 0, -20], type: 'buggy' }
+        ];
+
+        configs.forEach(bc => {
+          if (!stateRef.current.peers[bc.id]) {
+            const mData = createPeerModel(bc.type, bc.color);
+            peersGroup.add(mData.group);
+            mData.group.position.set(bc.pos[0], bc.pos[1], bc.pos[2]);
+            
+            stateRef.current.peers[bc.id] = {
+              id: bc.id,
+              name: bc.name,
+              mesh: mData.group,
+              hp: 100,
+              targetPos: new THREE.Vector3(...bc.pos),
+              targetRotY: 0,
+              pilotType: bc.type,
+              isFiring: false,
+              lastUpdate: nowMs
+            };
+            updatePeerLabel(mData.sprite, bc.name, 100);
+          }
+        });
+      }
+
+      // Run real-time lerp transitions and motion paths for remote and simulated bots
+      Object.keys(stateRef.current.peers).forEach(id => {
+        const peer = stateRef.current.peers[id];
+        if (id.startsWith('sim_') && peer.hp > 0 && !stateRef.current.meshFrozen && cinematicStep === 'NONE') {
+          const tFactor = nowMs * 0.001;
+          if (id === 'sim_1') {
+            const x = -25 + Math.sin(tFactor * 0.45) * 32;
+            const z = 10 + Math.cos(tFactor * 0.45) * 32;
+            const y = 26 + Math.sin(tFactor * 0.9) * 10;
+            peer.mesh.position.set(x, y, z);
+            peer.mesh.rotation.y = tFactor * 0.45 + Math.PI / 2;
+
+            if (Math.random() < 0.02) {
+              peer.isFiring = true;
+              // spawn beautiful pink tracer lasers
+              const laserMat = new THREE.MeshBasicMaterial({ color: 0xec4899 });
+              const laserBeam = new THREE.Mesh(laserBeamGeo, laserMat);
+              laserBeam.rotation.x = Math.PI / 2;
+              laserBeam.rotation.y = peer.mesh.rotation.y;
+              laserBeam.position.copy(peer.mesh.position);
+              worldGroup.add(laserBeam);
+
+              const pHeading = peer.mesh.rotation.y;
+              const pDir = new THREE.Vector3(Math.sin(pHeading), 0.1, Math.cos(pHeading)).normalize();
+              playerBullets.push({
+                mesh: laserBeam,
+                vel: pDir.multiplyScalar(32.0),
+                life: 1.2
+              });
+            } else {
+              peer.isFiring = false;
+            }
+          } else {
+            const x = 20 + Math.cos(tFactor * 0.55) * 25;
+            const z = -20 + Math.sin(tFactor * 0.55) * 25;
+            peer.mesh.position.set(x, getTerrainHeight(x, z), z);
+            peer.mesh.rotation.y = -tFactor * 0.55;
+          }
+        } else if (!id.startsWith('sim_')) {
+          peer.mesh.position.lerp(peer.targetPos, 0.15);
+          peer.mesh.rotation.y = THREE.MathUtils.lerp(peer.mesh.rotation.y, peer.targetRotY, 0.15);
+          
+          if (nowMs - peer.lastUpdate > 8000) {
+            peersGroup.remove(peer.mesh);
+            delete stateRef.current.peers[id];
+          }
+        }
+      });
 
       // UPDATE Atmospheric Winds
       dustMeshes.forEach(d => {
@@ -1020,15 +1645,53 @@ export default function GameCanvas({
           activeEntity.position.y = terrainH;
         } else {
           // Spaceship hovers high
+          // If Space is held, engage vertical thursters to ascend rapidly into the upper orbit dogfight layer!
+          if (stateRef.current.inputs.space) {
+            activeEntity.position.y += delta * 15.0; // rapid ascend
+          } else {
+            // damp altitude back to normal hover height over landscape if no fly input
+            activeEntity.position.y += (terrainH + 4.5 - activeEntity.position.y) * 0.05;
+          }
           activeEntity.position.y = Math.max(terrainH + 3.0, activeEntity.position.y);
-          // damp height back to 3m hover if no fly input
-          activeEntity.position.y += (terrainH + 4.5 - activeEntity.position.y) * 0.05;
+        }
+
+        // Atmospheric layer telemetry & transition checks
+        const altVal = Math.round(activeEntity.position.y);
+        if (Math.floor(durationInIntro * 10) % 3 === 0) {
+          setCurrentAltitude(altVal);
+        }
+
+        const inOrbitLayer = activeEntity.position.y > 18.0;
+        if (inOrbitLayer) {
+          // Cross atmospheric barrier: thin out fog for deep space view, accelerate Mercury's rotation
+          if (scene.fog && 'density' in scene.fog) {
+            scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, 0.003, 0.08);
+          }
+          planetBody.rotation.y += delta * 0.18;
+        } else {
+          if (scene.fog && 'density' in scene.fog) {
+            scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, 0.015, 0.08);
+          }
+        }
+
+        // Jointed limbs independent leg-swing animations on movement
+        if (pilot === 'character') {
+          if (moveX !== 0 || moveZ !== 0) {
+            const legSwingSpeed = 13.5;
+            const legSwingAmplitude = 0.55;
+            legLGroup.rotation.x = Math.sin(durationInIntro * legSwingSpeed) * legSwingAmplitude;
+            legRGroup.rotation.x = -Math.sin(durationInIntro * legSwingSpeed) * legSwingAmplitude;
+          } else {
+            legLGroup.rotation.x += (0 - legLGroup.rotation.x) * 0.18;
+            legRGroup.rotation.x += (0 - legRGroup.rotation.x) * 0.18;
+          }
         }
 
         // Simple tire rotate animation on buggy movement
         if (pilot === 'buggy' && (moveX !== 0 || moveZ !== 0)) {
           tires.forEach(t => t.rotation.x += delta * 12);
         }
+
 
         // Sync player position for visual radar min-map
         telemetryRef.current.playerPos.copy(activeEntity.position);
@@ -1199,6 +1862,42 @@ export default function GameCanvas({
             }
           });
 
+          // HIGH-PRECISION DECENTRALIZED MULTIPLAYER PEER COLLISION matrix
+          Object.keys(stateRef.current.peers).forEach((peerId) => {
+            const peer = stateRef.current.peers[peerId];
+            if (peer.hp > 0 && pb.life > 0) {
+              const peerDist = pb.mesh.position.distanceTo(peer.mesh.position);
+              // Bounding box approximate sphere radius for combat units is 2.8 units
+              if (peerDist < 2.8) {
+                // Instantly absorb kinetic force registering direct damage structure
+                peer.hp = Math.max(0, peer.hp - 20);
+                pb.life = 0; // absorb projectile on target impact
+
+                // Broadcast local high-priority Tankeel overdrive kill-feed across all connected network nodes when health drops to 0!
+                if (peer.hp <= 0) {
+                  const killerName = stats.isMasterMode 
+                    ? (ar ? 'المهندس سهيل الهزبري' : 'Eng. Suhail Al-Hazbari')
+                    : (ar ? 'الطيار التكتيكي ألفا' : 'Pilot Tactical Alpha');
+
+                  meshChannel.postMessage({
+                    type: 'tankeel_kill',
+                    killerName,
+                    killedName: peer.name
+                  });
+
+                  // Execute locally immediately to guarantee instant response overlay
+                  triggerTankeelOverdriveKillFeed(killerName, peer.name);
+                } else {
+                  // Sync updated peer label
+                  const sprite = peer.mesh.children.find(c => c instanceof THREE.Sprite) as THREE.Sprite;
+                  if (sprite) {
+                    updatePeerLabel(sprite, peer.name, peer.hp);
+                  }
+                }
+              }
+            }
+          });
+
           if (pb.life <= 0) {
             worldGroup.remove(pb.mesh);
             playerBullets.splice(idx, 1);
@@ -1215,15 +1914,20 @@ export default function GameCanvas({
               // rotate to face player
               enemy.mesh.lookAt(activeEntity.position);
 
+              const speedScaler = stats.level > 1 ? 1.42 : 1.0;
+              const reFireScaler = stats.level > 1 ? 1.6 : 1.0;
+
               // move closer but maintain buffer distance
               if (distToPlayer > (enemy.type === 'drone' ? 8 : enemy.type === 'boss' ? 12 : 1.5)) {
                 const stepVec = new THREE.Vector3()
                   .subVectors(activeEntity.position, enemy.mesh.position)
                   .normalize();
-                enemy.mesh.position.addScaledVector(stepVec, enemy.speed * (1.0 + delta));
+                enemy.mesh.position.addScaledVector(stepVec, enemy.speed * (1.0 + delta) * speedScaler);
                 
-                // Keep flight altitude for drone
-                if (enemy.type === 'drone') {
+                // Lift hostiles into upper high-orbit layer for sci-fi dogfights if the spacecraft climbed
+                if (inOrbitLayer) {
+                  enemy.mesh.position.y += (activeEntity.position.y - enemy.mesh.position.y) * 0.05;
+                } else if (enemy.type === 'drone') {
                   enemy.mesh.position.y = getTerrainHeight(enemy.mesh.position.x, enemy.mesh.position.z) + 3.0;
                 } else {
                   enemy.mesh.position.y = getTerrainHeight(enemy.mesh.position.x, enemy.mesh.position.z);
@@ -1231,9 +1935,10 @@ export default function GameCanvas({
               }
 
               // Shoot weapon at character
-              enemy.shootCooldown -= delta;
+              enemy.shootCooldown -= delta * reFireScaler; // scaled attack pacing
               if (enemy.shootCooldown <= 0) {
                 enemy.shootCooldown = enemy.type === 'boss' ? 1.0 : 2.5; // refire rate
+
                 
                 // Spawn laser bullet
                 const ebGeo = new THREE.SphereGeometry(0.18, 4, 4);
@@ -1303,14 +2008,32 @@ export default function GameCanvas({
         const targetZ = activeEntity.position.z - Math.cos(stateRef.current.cameraYaw) * distBehind;
         const targetY = activeEntity.position.y + 2.5 + stateRef.current.cameraPitch * 3.0;
 
-        camera.position.x += (targetX - camera.position.x) * 0.12;
-        camera.position.y += (targetY - camera.position.y) * 0.12;
-        camera.position.z += (targetZ - camera.position.z) * 0.12;
+        let shakeOffset = new THREE.Vector3();
+        if (stateRef.current.shakeIntensity > 0) {
+          const intensity = stateRef.current.shakeIntensity;
+          shakeOffset.set(
+            (Math.random() - 0.5) * intensity,
+            (Math.random() - 0.5) * intensity,
+            (Math.random() - 0.5) * intensity
+          );
+        }
+
+        camera.position.x += (targetX - camera.position.x) * 0.12 + shakeOffset.x;
+        camera.position.y += (targetY - camera.position.y) * 0.12 + shakeOffset.y;
+        camera.position.z += (targetZ - camera.position.z) * 0.12 + shakeOffset.z;
 
         // lock target slightly above character core
         const lookT = activeEntity.position.clone();
         lookT.y += pilot === 'character' ? 1.3 : 0.8;
         camera.lookAt(lookT);
+
+        // Linear matrix transformation zoom representing tactical high magnification cockpit visor
+        if (stateRef.current.isSniper && pilot === 'spaceship') {
+          camera.fov = THREE.MathUtils.lerp(camera.fov, 11, 0.2); // Magnify targeting view
+        } else {
+          camera.fov = THREE.MathUtils.lerp(camera.fov, 54, 0.2); // restore standard FOV
+        }
+        camera.updateProjectionMatrix();
       }
 
       renderer.render(scene, camera);
@@ -1505,6 +2228,47 @@ export default function GameCanvas({
       {/* Three WebGL Canvas */}
       <canvas ref={canvasRef} className="w-full h-full block cursor-grab active:cursor-grabbing z-0" />
 
+      {/* HOLOGRAPHIC RED SNIPER SCOPE RETICLE OVERLAY when Sniper mode is active */}
+      {isSniperMode && activePilotType === 'spaceship' && (
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
+          <div className="relative w-[320px] h-[320px] md:w-[440px] md:h-[440px] rounded-full border-2 border-red-500/40 p-4 flex items-center justify-center shadow-[0_0_60px_rgba(239,68,68,0.25)] animate-pulse">
+            {/* crosshairs lines */}
+            <div className="absolute w-[480px] h-0.5 bg-red-500/30" />
+            <div className="absolute w-0.5 h-[480px] bg-red-500/30" />
+            
+            {/* tick cross dividers */}
+            <div className="absolute w-12 h-0.5 bg-red-500 top-1/2 left-4 animate-pulse" />
+            <div className="absolute w-12 h-0.5 bg-red-500 top-1/2 right-4 animate-pulse" />
+            <div className="absolute h-12 w-0.5 bg-red-500 left-1/2 top-4 animate-pulse" />
+            <div className="absolute h-12 w-0.5 bg-red-500 left-1/2 bottom-4 animate-pulse" />
+
+            {/* active locked lens center */}
+            <div className="w-10 h-10 border border-red-500/80 rounded-full flex items-center justify-center animate-spin">
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
+            </div>
+
+            {/* overlay indicators */}
+            <span className="absolute top-12 font-mono text-[9px] text-red-500 font-bold tracking-widest bg-black/60 px-2.5 py-0.5 rounded border border-red-500/30">
+              {ar ? 'تَعْقِيبُ الْهُدَفِ: نِشاطُ الْقَنُصِ' : 'TARGET ACQUISITION: ACTIVE'}
+            </span>
+            <span className="absolute bottom-12 font-mono text-[8px] text-red-400 font-bold tracking-wider bg-black/60 px-2 py-0.5 rounded border border-red-500/20">
+              {ar ? 'الزوم الْمُتَعَدِّدُ: 4.5X ليزر' : 'ZOOM AMPLIFIED: 4.5X RAIL'}
+            </span>
+
+            {/* SCAN PROGRESS BAR */}
+            <div className="absolute bottom-6 w-48 h-1.5 bg-black/60 border border-red-500/30 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-red-500 transition-all duration-300 ease-linear shadow-[0_0_10px_rgba(239,68,68,0.8)]"
+                style={{ width: `${sniperScanProgress}%` }}
+              />
+            </div>
+            <span className="absolute bottom-2 font-mono text-[7px] text-red-500 font-bold">
+              {ar ? 'تصفية النطاق الجوي...' : 'CLEARING SECTOR...'} {sniperScanProgress}%
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* MISSION DEPLOY CINEMATIC OVERLAY GRID */}
       {cinematicStep !== 'NONE' && (
         <div className="absolute inset-0 z-30 bg-black/75 flex flex-col items-center justify-center p-6 text-center select-none backdrop-blur-xs font-sans">
@@ -1531,15 +2295,115 @@ export default function GameCanvas({
       {/* STANDARD HEADS UP DISPLAY / IN-GAME CANVAS CONTROLS */}
       {cinematicStep === 'NONE' && (
         <>
+          {/* Holographic Hotspot Multi-Peer Tactical Mesh Grid Panel */}
+          <div className="absolute top-24 left-2 z-10 w-44 bg-black/55 border border-cyan-500/20 rounded-xl p-2 font-mono text-[9px] backdrop-blur-md text-left flex flex-col gap-1 shadow-[0_0_12px_rgba(6,182,212,0.1)]">
+            <div className="flex justify-between items-center border-b border-cyan-500/20 pb-1 text-cyan-400 font-bold tracking-wider">
+              <span>🛰️ {ar ? 'شبكة النظير المحلية' : 'LOCAL HOTSPOT MESH'}</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+            </div>
+            <div className="text-[8px] text-neutral-400 flex flex-col gap-0.5 mt-1 max-h-[140px] overflow-y-auto">
+              <div className="flex justify-between text-cyan-300 font-mono">
+                <span>{ar ? 'معرّف الجهاز:' : 'NODE_ID:'}</span>
+                <span className="text-neutral-300 font-bold">{clientId}</span>
+              </div>
+              <div className="flex justify-between text-neutral-400 font-mono">
+                <span>{ar ? 'المنظومة:' : 'BANDWIDTH:'}</span>
+                <span className="text-neutral-300">240 ms/sync</span>
+              </div>
+              
+              {/* Render lists of connected nodes */}
+              <div className="border-t border-neutral-800 my-1 pt-1 font-bold text-amber-500">
+                {ar ? 'الطيارون المتصلون:' : 'ACTIVE HOTSPOTS MAPPED:'}
+              </div>
+              {Object.keys(activePeers).length === 0 ? (
+                <div className="text-neutral-500 italic block">{ar ? 'رصد طيارين...' : 'Scanning for pilot nodes...'}</div>
+              ) : (
+                Object.keys(activePeers).map(pId => {
+                  const p = activePeers[pId];
+                  return (
+                    <div key={pId} className="flex flex-col border-b border-neutral-900 pb-1 mb-1 gap-0.5">
+                      <div className="flex justify-between font-bold text-neutral-100">
+                        <span className="truncate max-w-[90px]">{p.name}</span>
+                        <span className={p.hp > 0 ? 'text-emerald-400 font-bold' : 'text-red-500 animate-pulse font-bold'}>
+                          {p.hp > 0 ? `${p.hp}%` : 'DOWN'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-neutral-500 text-[7px]">
+                        <span>X: {p.pos[0].toFixed(1)} Z: {p.pos[2].toFixed(1)}</span>
+                        <span className="capitalize text-cyan-400 font-bold">{p.pilotType}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {/* Proud master developer signature right on the console panel */}
+            <div className="border-t border-cyan-500/10 mt-1 pt-1.5 text-[7px] text-cyan-400/40 text-center uppercase tracking-tighter">
+              {ar ? 'برمجة المهندس/ سهيل الهزبري' : 'Arch. By Eng. Suhail Al-Hazbari'}
+            </div>
+          </div>
+
+          {/* Master Developer Neon Watermark */}
+          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-center select-none pointer-events-none">
+            <div className="text-[10px] md:text-xs font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-amber-300 to-cyan-400 tracking-[0.25em] drop-shadow-[0_0_8px_rgba(6,182,212,0.6)] uppercase animate-pulse">
+              برمجة المهندس/ سهيل الهزبري
+            </div>
+            <div className="text-[7.5px] md:text-[8.5px] font-mono tracking-[0.3em] text-cyan-400/80 uppercase mt-0.5 font-bold">
+              هندسة المحركات للمهندس سهيل الهزبري
+            </div>
+          </div>
+          {/* Top-Center Glassmorphic Cockpit Music Controller (135 BPM Tribal Synth) */}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 bg-cyan-950/45 border border-cyan-500/35 py-1.5 px-3.5 rounded-2xl backdrop-blur-md shadow-[0_0_15px_rgba(6,182,212,0.15)] max-w-xs md:max-w-md">
+            <button
+              onClick={handleCockpitMusicToggle}
+              className={`w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition-all ${
+                isMusicPlaying
+                  ? 'bg-red-500/90 animate-pulse text-white shadow-[0_0_10px_rgba(239,68,68,0.4)] border border-red-400'
+                  : 'bg-cyan-500 text-neutral-950 hover:bg-cyan-400'
+              }`}
+            >
+              {isMusicPlaying ? (
+                <span className="w-2 h-2 bg-white rounded-xs" />
+              ) : (
+                <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+              )}
+            </button>
+            <div className="flex flex-col text-left">
+              <span className="text-[7.5px] font-mono font-bold tracking-[0.2em] text-cyan-400 uppercase leading-none">
+                {ar ? 'الإذاعة العسكرية' : 'COCKPIT BAND LINK'}
+              </span>
+              <span className="text-[9px] font-mono font-medium text-neutral-200 mt-0.5 truncate max-w-[125px] md:max-w-[185px] leading-tight">
+                {isMusicPlaying ? (ar ? 'زامل ترايبال (١٣٥ محاكاة)' : 'Tankeel: 135 Tribal Synth') : (ar ? 'البث مغلق' : 'PLAYER STANDBY')}
+              </span>
+            </div>
+            {isMusicPlaying && (
+              <div className="flex items-center gap-0.5 h-3.5 min-w-[18px]">
+                <div className="w-[1.5px] bg-cyan-400 rounded-full animate-pulse h-1" />
+                <div className="w-[1.5px] bg-cyan-400 rounded-full animate-bounce h-2" style={{ animationDelay: '0.1s' }} />
+                <div className="w-[1.5px] bg-cyan-400 rounded-full animate-bounce h-3.5" style={{ animationDelay: '0.2s' }} />
+                <div className="w-[1.5px] bg-cyan-400 rounded-full animate-bounce h-2" style={{ animationDelay: '0.3s' }} />
+                <div className="w-[1.5px] bg-cyan-400 rounded-full animate-pulse h-1" />
+              </div>
+            )}
+          </div>
+
           {/* Top-Left: Mini Radar Scan */}
           <div className="absolute top-2 left-2 z-10 flex items-center gap-2 bg-black/60 border border-cyan-500/20 py-1.5 px-2 rounded-xl backdrop-blur-md">
             <canvas ref={miniMapRef} width="70" height="70" className="w-11 h-11 bg-neutral-950 rounded-full border border-cyan-500/20" />
             <div className="flex flex-col text-[9px] font-mono leading-none py-1 text-neutral-400">
               <span className="text-cyan-400 font-bold">{ar ? 'الرادار النشط' : 'RADAR LINK'}</span>
-              <span className="mt-1 font-mono hover:text-cyan-400">Cryst: {crystalsCollected}/5</span>
-              <span className="mt-1 font-mono hover:text-cyan-400">Elims: {enemiesDefeated}</span>
+              <span className="mt-1 font-mono hover:text-cyan-400 text-neutral-300">Level: {currentLevel}</span>
+              <span className="mt-1 font-mono hover:text-cyan-400 text-neutral-300">Cryst: {crystalsCollected}/5</span>
+              <span className="mt-1 font-mono hover:text-cyan-400 text-neutral-300">Elims: {enemiesDefeated}</span>
+              <span className="mt-1 font-mono text-amber-400 font-bold">
+                {ar ? 'الارتفاع: ' : 'ALT: '}{currentAltitude}m
+                {currentAltitude >= 18 && (
+                  <span className="text-red-500 ml-1 font-black animate-pulse">[ORBIT]</span>
+                )}
+              </span>
             </div>
           </div>
+
 
           {/* Top-Right: Suit Core diagnostics */}
           <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 w-36 bg-black/60 border border-white/5 py-2 px-3 rounded-xl backdrop-blur-md">
@@ -1623,25 +2487,46 @@ export default function GameCanvas({
           {/* Right Side: Primary touch action nodes */}
           <div className="absolute bottom-2 right-6 z-10 flex items-end gap-3.5">
             {/* Board/Exit vehicle button */}
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={toggleVehicleF}
-                className="w-12 h-12 rounded-full bg-amber-500 text-neutral-950 border border-amber-400 flex flex-col items-center justify-center shadow-lg hover:bg-amber-400 active:scale-90 select-none cursor-pointer"
-                title={ar ? 'مغادرة/ركوب المركبة' : 'Pilot vehicle (F)'}
-              >
-                <Landmark className="w-5 h-5" />
-                <span className="text-[7px] font-mono uppercase leading-none font-bold">VEH (F)</span>
-              </button>
+             <div className="flex flex-col gap-2">
+               {/* Interactive cockpit Sniper-Scope Button (زر العدسة) */}
+               {activePilotType === 'spaceship' && (
+                 <button
+                   onClick={() => {
+                     sound.playClick();
+                     const nextSniper = !isSniperMode;
+                     setIsSniperMode(nextSniper);
+                     stateRef.current.isSniper = nextSniper;
+                   }}
+                   className={`w-12 h-12 rounded-full flex flex-col items-center justify-center shadow-lg active:scale-90 transition-all select-none cursor-pointer border ${
+                     isSniperMode 
+                       ? 'bg-red-500/90 text-white border-red-300 animate-pulse font-bold' 
+                       : 'bg-neutral-900/90 border-neutral-700 text-red-500 hover:border-red-500'
+                   }`}
+                   title={ar ? 'منظار القنص / زر العدسة' : 'Sniper Scope'}
+                 >
+                   <Eye className="w-5 h-5" />
+                   <span className="text-[7px] font-mono uppercase leading-none mt-0.5 font-bold">SCOPE</span>
+                 </button>
+               )}
 
-              <button
-                onClick={triggerWeaponSwap}
-                className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-700 text-cyan-400 flex flex-col items-center justify-center shadow-lg hover:border-cyan-400 active:scale-90 select-none cursor-pointer"
-                title={ar ? 'تبديل السلاح' : 'Swap Weapon (Q)'}
-              >
-                <ArrowLeftRight className="w-5 h-5" />
-                <span className="text-[7px] font-mono uppercase leading-none font-bold">SWAP (Q)</span>
-              </button>
-            </div>
+               <button
+                 onClick={toggleVehicleF}
+                 className="w-12 h-12 rounded-full bg-amber-500 text-neutral-950 border border-amber-400 flex flex-col items-center justify-center shadow-lg hover:bg-amber-400 active:scale-90 select-none cursor-pointer"
+                 title={ar ? 'مغادرة/ركوب المركبة' : 'Pilot vehicle (F)'}
+               >
+                 <Landmark className="w-5 h-5" />
+                 <span className="text-[7px] font-mono uppercase leading-none font-bold">VEH (F)</span>
+               </button>
+ 
+               <button
+                 onClick={triggerWeaponSwap}
+                 className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-700 text-cyan-400 flex flex-col items-center justify-center shadow-lg hover:border-cyan-400 active:scale-90 select-none cursor-pointer"
+                 title={ar ? 'تبديل السلاح' : 'Swap Weapon (Q)'}
+               >
+                 <ArrowLeftRight className="w-5 h-5" />
+                 <span className="text-[7px] font-mono uppercase leading-none font-bold">SWAP (Q)</span>
+               </button>
+             </div>
 
             {/* Jump button */}
             <button
@@ -1720,6 +2605,102 @@ export default function GameCanvas({
             >
               {ar ? 'العودة لخريطة الكواكب' : 'Return to Galactic Navigation'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MILITARY GLASSMORPHIC DIALOG MODAL ON HEADPHONES NOT DETECTED */}
+      {showHeadphonesWarning && (
+        <div className="absolute inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-6 text-center select-none backdrop-filter backdrop-blur-[16px]">
+          <div className="max-w-md w-full border border-red-500/40 bg-red-950/20 backdrop-blur-xl rounded-2xl p-6 shadow-[0_0_35px_rgba(239,68,68,0.25)] flex flex-col items-center gap-4 relative">
+            <div className="p-4 rounded-full bg-red-500/10 border border-red-500 text-red-500">
+              <Headphones className="w-10 h-10 animate-pulse text-red-500" />
+            </div>
+
+            <h3 className="text-sm font-black text-red-400 uppercase tracking-widest font-mono">
+              {ar ? 'بروتوكول البث المشفر: مطلوب سماعة' : 'SECURE AUDIO PIPELINE REQUISITION'}
+            </h3>
+
+            <div className="bg-black/40 border border-red-500/20 p-3 rounded-xl font-sans text-xs space-y-2 leading-relaxed text-center">
+              <p className="text-neutral-100 font-bold">
+                {ar 
+                  ? '⚠️ تنبيه عسكري: يرجى توصيل سماعة الأذن السلكية الجديدة لعيش جو الحرب الحماسي!' 
+                  : '⚠️ MILITARY ALERT: Please connect a wired headset first to experience the intense battle atmosphere!'}
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 w-full mt-2">
+              <button
+                onClick={async () => {
+                  sound.playClick();
+                  const headphonesCheck = await sound.checkWiredHeadphones();
+                  if (headphonesCheck) {
+                    forceStartCockpitMusic();
+                  } else {
+                    alert(ar ? 'سماعة الرفع غير مكتشفة بعد. جرب تجاوز البروتوكول.' : 'Secure hardware sensor failed to detect headphone jack signature. Try overriding.');
+                  }
+                }}
+                className="flex-1 py-2 bg-neutral-900 border border-red-500/30 hover:border-red-500 text-red-400 rounded-xl text-xs font-mono font-bold hover:bg-red-500/10 cursor-pointer transition-all"
+              >
+                {ar ? 'إعادة الفحص الدقيق 🔍' : 'Check Hardware Sensor 🔍'}
+              </button>
+
+              <button
+                onClick={forceStartCockpitMusic}
+                className="flex-1 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-neutral-950 rounded-xl text-xs font-bold hover:opacity-90 cursor-pointer shadow-[0_4px_12px_rgba(245,158,11,0.25)] transition-all"
+              >
+                {ar ? 'تجاوز بروتوكول الأمان ⚡' : 'Bypass Secure Protocol ⚡'}
+              </button>
+            </div>
+
+            <button
+              onClick={() => {
+                sound.playClick();
+                setShowHeadphonesWarning(false);
+              }}
+              className="mt-1 text-[10px] font-mono text-neutral-500 hover:text-neutral-300 underline cursor-pointer"
+            >
+              {ar ? 'إلغاء الأمر' : 'Disconnect Audio Link'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TANKEEL OVERDRIVE KILL ALERT SECTION */}
+      {showTankeelAlert && (
+        <div className="absolute inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-6 text-center select-none backdrop-filter backdrop-blur-[16px]">
+          <div className="max-w-xl w-full border-2 border-red-500 bg-red-950/20 backdrop-blur-2xl rounded-2xl p-8 shadow-[0_0_50px_rgba(239,68,68,0.4)] flex flex-col items-center gap-5 relative overflow-hidden">
+            {/* Outer hazard border */}
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-red-600 via-amber-500 to-red-600 animate-pulse" />
+            
+            <div className="p-5 rounded-full bg-red-500/10 border border-red-500 text-red-500">
+              <Crosshair className="w-12 h-12 text-red-500" />
+            </div>
+
+            <h1 className="text-2xl md:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-b from-red-400 to-red-600 leading-none tracking-wider uppercase font-mono animate-pulse">
+              {ar ? '⚠️ تم التنكيل بالأهداف' : '⚠️ ELIMINATION REGISTERED'}
+            </h1>
+
+            <div className="p-4 bg-black/60 border border-red-500/30 rounded-xl space-y-3 w-full font-mono">
+              <p className="text-sm md:text-base font-bold text-red-400 leading-relaxed">
+                {ar ? tankeelAlertText.ar : tankeelAlertText.en}
+              </p>
+              <p className="text-[10px] text-neutral-400 leading-relaxed text-left">
+                {ar 
+                  ? 'بروتوكول الأوفر درايف النشط: تم تجميد حركة جميع الأجهزة المتصلة مؤقتاً لتزامن بيانات الانفجار عالي التردد.' 
+                  : 'Tactical Overdrive protocol active: Freeze command dispatched to all connected clients to synchronize high-frequency kinetic outputs.'}
+              </p>
+            </div>
+
+            {/* Glowing Master Watermark */}
+            <div className="border-t border-neutral-800 w-full pt-4 mt-1 text-center">
+              <div className="text-[11px] font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-amber-300 to-cyan-400 tracking-[0.2em] font-bold">
+                برمجة المهندس/ سهيل الهزبري
+              </div>
+              <div className="text-[8px] font-mono tracking-[0.25em] text-cyan-400/70 uppercase mt-1 font-bold">
+                هندسة المحركات للمهندس سهيل الهزبري
+              </div>
+            </div>
           </div>
         </div>
       )}

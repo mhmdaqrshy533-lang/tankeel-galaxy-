@@ -405,6 +405,263 @@ class SoundEngine {
     this.ambientOsc.frequency.setTargetAtTime(baseFreq, this.ctx.currentTime, 0.2);
     this.ambientOsc2.frequency.setTargetAtTime(baseFreq * 2, this.ctx.currentTime, 0.2);
   }
+
+  // Native wired headphones audio session sensing
+  async checkWiredHeadphones(): Promise<boolean> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const hasHeadphones = devices.some(device => 
+        device.kind === 'audiooutput' && 
+        (device.label.toLowerCase().includes('headphone') || 
+         device.label.toLowerCase().includes('headset') || 
+         device.label.toLowerCase().includes('wired') ||
+         device.label.toLowerCase().includes('jack') ||
+         device.label.toLowerCase().includes('earphone'))
+      );
+
+      // Node frequency destination configuration matrix
+      if (this.ctx && this.ctx.destination) {
+        const dest = this.ctx.destination;
+        if (dest.maxChannelCount > 2 || hasHeadphones) {
+          return true;
+        }
+      }
+      return hasHeadphones;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ISSA AL-LAITH ZAMIL TRIBAL STEP-SEQUENCER & STREAMER
+  private tribalInterval: any = null;
+  private tribalStep: number = 0;
+  private zamilAudio: HTMLAudioElement | null = null;
+  public isUsingSynthFallback = false;
+
+  playZamilKick(time: number) {
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(55, time); // Exactly 55Hz sub-bass as requested
+    osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.16);
+    
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(80, time);
+    
+    osc.disconnect(gain);
+    osc.connect(filter);
+    filter.connect(gain);
+
+    gain.gain.setValueAtTime(0.5, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.16);
+    
+    osc.start(time);
+    osc.stop(time + 0.18);
+  }
+
+  playZamilSnare(time: number) {
+    if (!this.ctx || !this.masterGain) return;
+    const bufferSize = this.ctx.sampleRate * 0.12;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1200, time);
+    filter.frequency.exponentialRampToValueAtTime(180, time + 0.08);
+    
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.2, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+    
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    
+    noise.start(time);
+    noise.stop(time + 0.12);
+  }
+
+  playReplicaMelody(time: number, step: number) {
+    if (!this.ctx || !this.masterGain) return;
+    // Classic driving epic war-march minor key cadences (Zamil style) at 135 BPM
+    const zamilScale = [220.00, 220.00, 246.94, 261.63, 293.66, 261.63, 246.94, 220.00]; 
+    const freq = zamilScale[step % 8];
+
+    // Dual-Oscillator Synth Circuit (combining Sawtooth + Square)
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    const gain2 = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(freq, time);
+
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(freq * 0.5, time); // sub-octave layer for grit
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, time);
+    filter.frequency.exponentialRampToValueAtTime(140, time + 0.25);
+
+    gain1.gain.setValueAtTime(0.1, time);
+    gain1.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+
+    gain2.gain.setValueAtTime(0.05, time);
+    gain2.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(this.masterGain);
+
+    osc1.start(time);
+    osc2.start(time);
+    osc1.stop(time + 0.26);
+    osc2.stop(time + 0.26);
+  }
+
+  startTribalZamilSynth() {
+    this.resume();
+    if (!this.ctx || !this.masterGain) return;
+    if (this.tribalInterval) return;
+
+    this.isUsingSynthFallback = true;
+    this.tribalStep = 0;
+    const stepDuration = 60 / 135 / 2; // 135 BPM 8th notes ~0.222s
+
+    this.tribalInterval = setInterval(() => {
+      if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+
+      // Heavy 1st and 3rd / driver drum kick march
+      const isKickStep = this.tribalStep % 2 === 0;
+      if (isKickStep) {
+        this.playZamilKick(t);
+      }
+
+      // Syncopated military metallic drone snare burst
+      const isSnareStep = this.tribalStep % 8 === 3 || this.tribalStep % 8 === 6 || this.tribalStep % 8 === 7;
+      if (isSnareStep) {
+        this.playZamilSnare(t);
+      }
+
+      // Melodic driving brass synthesizer note
+      if (this.tribalStep % 2 === 1) {
+        this.playReplicaMelody(t, this.tribalStep);
+      }
+
+      this.tribalStep = (this.tribalStep + 1) % 64;
+    }, stepDuration * 1000);
+  }
+
+  stopTribalZamilSynth() {
+    if (this.tribalInterval) {
+      clearInterval(this.tribalInterval);
+      this.tribalInterval = null;
+    }
+    this.isUsingSynthFallback = false;
+  }
+
+  startTribalZamilStream() {
+    this.resume();
+    this.stopTribalZamilSynth();
+
+    if (this.zamilAudio) {
+      try {
+        this.zamilAudio.pause();
+      } catch (e) {}
+      this.zamilAudio = null;
+    }
+
+    try {
+      this.zamilAudio = new Audio('/assets/audio/zamil.mp3');
+      this.zamilAudio.volume = (this.settingsVolume / 100) * 0.5;
+      this.zamilAudio.loop = true;
+
+      const playPromise = this.zamilAudio.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          this.isUsingSynthFallback = false;
+          console.log("Stream successfully initiated for zamil.mp3.");
+        }).catch(err => {
+          console.warn("Could not play zamil.mp3 stream, launching high-energy synth fallback:", err);
+          this.startTribalZamilSynth();
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to instantiate HTML5 Audio, launching synthetic oscillators:", e);
+      this.startTribalZamilSynth();
+    }
+  }
+
+  stopTribalZamilStream() {
+    this.stopTribalZamilSynth();
+    if (this.zamilAudio) {
+      try {
+        this.zamilAudio.pause();
+      } catch (e) {}
+      this.zamilAudio = null;
+    }
+  }
+
+  // Screen shake sub-bass explosion decay envelope
+  triggerTankeelExplosion() {
+    this.resume();
+    if (!this.ctx || !this.masterGain) return;
+    const t = this.ctx.currentTime;
+
+    // Sub-bass heavy decay
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'triangle';
+    subOsc.frequency.setValueAtTime(95, t);
+    subOsc.frequency.exponentialRampToValueAtTime(25, t + 1.8);
+    subGain.gain.setValueAtTime(0.6, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+
+    subOsc.connect(subGain);
+    subGain.connect(this.masterGain);
+    subOsc.start(t);
+    subOsc.stop(t + 2.0);
+
+    // Deep heavy noise burst
+    const bufferSize = this.ctx.sampleRate * 1.5;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(150, t);
+    filter.frequency.exponentialRampToValueAtTime(30, t + 1.5);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.5, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    noise.start(t);
+    noise.stop(t + 1.6);
+  }
 }
 
 export const sound = new SoundEngine();

@@ -18,6 +18,7 @@ import AboutPanel from './components/AboutPanel';
 import GameCanvas from './components/GameCanvas';
 import ActivationScreen from './components/ActivationScreen';
 import DronesPanel from './components/DronesPanel';
+import SplashOverlay from './components/SplashOverlay';
 import { sound } from './utils/sound';
 
 // Initial default settings state
@@ -337,6 +338,7 @@ const initialAchievements: Achievement[] = [
 ];
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
   const [gameState, setGameState] = useState<GameState>(() => {
     const isActed = localStorage.getItem('tankeel_activated');
     return isActed ? 'MAIN_MENU' : 'ACTIVATION_SCREEN';
@@ -690,6 +692,12 @@ export default function App() {
 
   return (
     <AndroidFrame activeLanguage={activeLanguage}>
+      {showSplash && (
+        <SplashOverlay 
+          activeLanguage={activeLanguage} 
+          onComplete={() => setShowSplash(false)} 
+        />
+      )}
       {/* GAME STATE ROUTER */}
       {gameState === 'MAIN_MENU' && (
         <MainMenu

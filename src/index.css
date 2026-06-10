@@ -1,1 +1,83 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Glassmorphism Styles */
+.glass-panel {
+  background: rgba(10, 15, 30, 0.5) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(6, 182, 212, 0.4) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 242, 254, 0.12) !important;
+}
+
+.glass-panel-amber {
+  background: rgba(20, 15, 10, 0.5) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(245, 158, 11, 0.4) !important;
+  box-shadow: 0 8px 32px 0 rgba(245, 158, 11, 0.12) !important;
+}
+
+/* Cybernetic Angled Polygons / Buttons with cut corners */
+.cyber-btn {
+  position: relative;
+  clip-path: polygon(12px 0%, 100% 0%, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0% 100%, 0% 12px);
+  border: 1px solid rgba(6, 182, 212, 0.4) !important;
+  background: rgba(10, 20, 30, 0.7);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #22d3ee;
+}
+
+.cyber-btn:hover {
+  background: rgba(6, 182, 212, 0.25) !important;
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.45) !important;
+  transform: translateY(-1px);
+  border-color: rgba(6, 182, 212, 0.8) !important;
+  text-shadow: 0 0 4px rgba(34, 211, 238, 0.6);
+}
+
+.cyber-btn-amber {
+  position: relative;
+  clip-path: polygon(12px 0%, 100% 0%, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0% 100%, 0% 12px);
+  border: 1px solid rgba(245, 158, 11, 0.4) !important;
+  background: rgba(25, 15, 10, 0.7);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #fbbf24;
+}
+
+.cyber-btn-amber:hover {
+  background: rgba(245, 158, 11, 0.25) !important;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.45) !important;
+  transform: translateY(-1px);
+  border-color: rgba(245, 158, 11, 0.8) !important;
+  text-shadow: 0 0 4px rgba(251, 191, 36, 0.6);
+}
+
+/* Military Loading Progress Stripes */
+@keyframes hazard-scroll {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 40px 0;
+  }
+}
+
+.hazard-stripe-bar {
+  background-image: linear-gradient(
+    45deg,
+    #f97316 25%,
+    #171717 25%,
+    #171717 50%,
+    #f97316 50%,
+    #f97316 75%,
+    #171717 75%,
+    #171717
+  );
+  background-size: 40px 40px;
+  animation: hazard-scroll 1.2s linear infinite;
+}
